@@ -3,15 +3,17 @@ AMADEUS Retro Pixel Shimeji (Lab Assistant Desktop Companion)
 Ultra-lightweight Windows desktop pet that climbs on active window title bars,
 reads, drinks Dr Pepper, parachutes on minimize, and connects to the AMADEUS Brain.
 
-Enhanced Multimodal Features:
-- ️ Active Window & Screen Watcher (multimodal inspection of code/browser/errors)
--  Dynamic Emotion Sync (/ws/lively & /kurisu/sync)
--  Real-Time Kurisu Chat (/kurisu/chat with mem0 memory grounding)
--  Native Win32 window-hopping & parachute physics
--  0% GPU / <15MB RAM idle consumption
+Integrated Core Capabilities:
+1. Dr Pepper Pomodoro & Posture Break Sentinel (50m work / 5m Dr Pepper rest)
+2. Retro Nixie Tube Divergence Meter Dock (Steins;Gate 1.048596% HUD)
+3. Active Terminal & Build Error Guardian (Traceback/fail sniffer)
+4. Authentic Kurisu Japanese Voice & Audio Engine (winmm native audio)
+5. Screen Watcher & Multimodal Vision Analysis (Ctrl+Shift+S)
+6. Live Emotion Sync & Interactive Chat (Ctrl+Shift+K)
 """
 
 import base64
+import ctypes
 import io
 import json
 import math
@@ -37,6 +39,7 @@ except ImportError:
 
 
 SPRITES_DIR = Path(__file__).parent / "sprites"
+SOUNDS_DIR = Path(__file__).parent / "assets" / "sounds"
 CHROMA_KEY = "#000001"  # 100% transparent click-through color key on Windows
 
 # Built-in fallback Kurisu Tsundere / Lab Assistant dialogue lines
@@ -52,6 +55,139 @@ KURISU_QUOTES = [
     "Time travel is theoretically possible, but right now you should write tests.",
     "Keep this world line above 1.048596% divergence, understood?",
 ]
+
+
+class KurisuSoundManager:
+    """Native Windows audio player using winmm.dll (zero extra dependencies)."""
+
+    def __init__(self):
+        self.enabled = True
+        self.winmm = ctypes.windll.winmm
+        self._sound_files = {
+            "tap": list(SOUNDS_DIR.glob("tapBody_*.mp3")),
+            "flick": list(SOUNDS_DIR.glob("flickHead_*.mp3")),
+            "pinch": list(SOUNDS_DIR.glob("pinchIn_*.mp3")),
+            "shake": list(SOUNDS_DIR.glob("shake_*.mp3")),
+        }
+
+    def play(self, category: str = "tap"):
+        if not self.enabled:
+            return
+        files = self._sound_files.get(category, [])
+        if not files:
+            files = list(SOUNDS_DIR.glob("*.mp3"))
+        if not files:
+            return
+
+        sound_path = random.choice(files)
+
+        def _play():
+            try:
+                alias = f"kurisu_{int(time.time() * 1000) % 100000}"
+                cmd_open = f'open "{sound_path.resolve()}" type mpegvideo alias {alias}'
+                self.winmm.mciSendStringW(cmd_open, None, 0, None)
+                cmd_play = f"play {alias} wait"
+                self.winmm.mciSendStringW(cmd_play, None, 0, None)
+                cmd_close = f"close {alias}"
+                self.winmm.mciSendStringW(cmd_close, None, 0, None)
+            except Exception as exc:
+                logger.debug(f"KurisuSoundManager.play: silent exception ignored: {exc}")
+
+        threading.Thread(target=_play, daemon=True).start()
+
+
+class NixieDivergenceHUD:
+    """Floating retro Steins;Gate Nixie Tube Divergence Meter."""
+
+    def __init__(self, master, divergence="1.048596%"):
+        self.window = tk.Toplevel(master)
+        self.window.title("Divergence Meter")
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self.window.attributes("-transparentcolor", "#000001")
+        self.window.config(bg="#000001")
+
+        self.width = 170
+        self.height = 42
+        self.canvas = tk.Canvas(
+            self.window,
+            width=self.width,
+            height=self.height,
+            bg="#000001",
+            highlightthickness=0,
+        )
+        self.canvas.pack()
+
+        self.divergence = divergence
+        self.mode = "divergence"  # 'divergence', 'pomodoro'
+        self.pomodoro_seconds = 25 * 60
+        self.visible = False
+        self.hide()
+
+        self.canvas.bind("<Button-1>", self._toggle_mode)
+
+    def _toggle_mode(self, event):
+        self.mode = "pomodoro" if self.mode == "divergence" else "divergence"
+        self.render()
+
+    def set_divergence(self, val: str):
+        self.divergence = val
+        if self.mode == "divergence" and self.visible:
+            self.render()
+
+    def update_pomodoro(self, seconds_left: int):
+        self.pomodoro_seconds = seconds_left
+        if self.mode == "pomodoro" and self.visible:
+            self.render()
+
+    def render(self):
+        if not self.visible:
+            return
+        self.canvas.delete("all")
+
+        # Dark brass casing
+        self.canvas.create_rectangle(2, 2, self.width - 2, self.height - 2, fill="#120D0A", outline="#4A2E18", width=2)
+
+        # Text display
+        if self.mode == "divergence":
+            display = self.divergence
+            tag = "DIVERGENCE"
+        else:
+            m = self.pomodoro_seconds // 60
+            s = self.pomodoro_seconds % 60
+            display = f"{m:02d}:{s:02d}"
+            tag = "POMODORO"
+
+        # Glowing Nixie Tube orange text
+        self.canvas.create_text(
+            self.width // 2,
+            18,
+            text=display,
+            fill="#FF7700",
+            font=("Consolas", 14, "bold"),
+        )
+        # Small sub-label
+        self.canvas.create_text(
+            self.width // 2,
+            33,
+            text=f"[{tag}]",
+            fill="#884411",
+            font=("Consolas", 7, "bold"),
+        )
+
+    def set_position(self, x: int, y: int):
+        if self.visible:
+            self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+    def show(self, x: int, y: int):
+        self.visible = True
+        self.window.deiconify()
+        self.set_position(x, y)
+        self.render()
+
+    def hide(self):
+        self.visible = False
+        self.window.withdraw()
 
 
 class ShimejiBrainSync:
@@ -76,7 +212,6 @@ class ShimejiBrainSync:
     def _sync_kurisu_state(self):
         """Pulls emotion state, divergence, and spontaneous thoughts."""
         try:
-            # Sync telemetry from /kurisu/sync
             req = urllib.request.Request(
                 "http://localhost:8000/kurisu/sync",
                 headers={"Host": "localhost", "User-Agent": "AMADEUS-Shimeji/2.0"},
@@ -92,7 +227,10 @@ class ShimejiBrainSync:
                     self.app.on_emotion_change(dom_emotion)
 
                 telem = data.get("telemetry", {})
-                self.divergence = telem.get("divergence_meter", "1.048596%")
+                new_div = telem.get("divergence_meter", "1.048596%")
+                if new_div != self.divergence:
+                    self.divergence = new_div
+                    self.app.nixie.set_divergence(new_div)
 
         except Exception as exc:
             self.brain_online = False
@@ -120,16 +258,13 @@ class ShimejiBrainSync:
         def _worker():
             self.app.show_speech("Analyzing your screen...", frame="shime16")
             try:
-                # Capture screen crop
                 screen_img = ImageGrab.grab(bbox=bbox) if bbox else ImageGrab.grab()
-                # Downscale for snappy network transmission if huge
                 screen_img.thumbnail((1280, 720))
                 buf = io.BytesIO()
                 screen_img.save(buf, format="JPEG", quality=80)
                 img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
                 if self.brain_online:
-                    # Ask AMADEUS screen inspect
                     req = urllib.request.Request(
                         "http://localhost:8000/kurisu/chat",
                         headers={"Host": "localhost", "Content-Type": "application/json"},
@@ -160,7 +295,7 @@ class ShimejiBrainSync:
                 critique = "Reviewing business logistics? Keep the daily cashflow grounded."
                 emo = "content"
             else:
-                critique = f"Observing: '{window_title[:30]}…' Don't lose focus, lab member."
+                critique = f"Observing: '{window_title[:30]}...' Don't lose focus, lab member."
                 emo = "curious"
 
             self.app.show_speech(critique, emotion=emo)
@@ -185,7 +320,6 @@ class ShimejiBrainSync:
             except Exception as exc:
                 logger.debug(f"ShimejiBrainSync.ask_kurisu: silent exception ignored: {exc}")
 
-            # Fallback
             self.app.show_speech("Start AMADEUS Brain (Option 3 in Dev Dock) for full AI recall!", emotion="annoyed")
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -222,6 +356,9 @@ class AmadeusShimeji:
         self.sprites = {}
         self._load_sprites()
 
+        # Sound Engine
+        self.sound = KurisuSoundManager()
+
         # State machine
         self.state = "WALK"
         self.x = self.screen_width // 2
@@ -235,6 +372,14 @@ class AmadeusShimeji:
         self.idle_timer = 0
         self.speech_bubble_timer = 0
         self.dominant_emotion = "content"
+
+        # 1. Dr Pepper Pomodoro Sentinel (50m work -> 5m rest)
+        self.focus_seconds = 0
+        self.break_seconds = 0
+        self.is_taking_break = False
+
+        # 3. Terminal Error Guardian
+        self.last_alerted_error = ""
 
         # Drag tracking
         self.is_dragging = False
@@ -254,19 +399,25 @@ class AmadeusShimeji:
         self.root.bind_all("<Control-Shift-K>", lambda e: self._prompt_chat_dialog())
         self.root.bind_all("<Control-Shift-k>", lambda e: self._prompt_chat_dialog())
 
+        # 2. Floating Nixie Divergence HUD
+        self.nixie = NixieDivergenceHUD(self.root)
+
         # Brain connection
         self.brain = ShimejiBrainSync(self)
 
         # Context Menu
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label=" Inspect Active Screen (Ctrl+Shift+S)", command=self._inspect_screen)
-        self.menu.add_command(label=" Talk to Kurisu (Ctrl+Shift+K)", command=self._prompt_chat_dialog)
+        self.menu.add_command(label="Inspect Active Screen (Ctrl+Shift+S)", command=self._inspect_screen)
+        self.menu.add_command(label="Talk to Kurisu (Ctrl+Shift+K)", command=self._prompt_chat_dialog)
+        self.menu.add_command(label="Toggle Nixie Divergence HUD", command=self._toggle_nixie_hud)
+        self.menu.add_command(label="Take Dr Pepper Break Now", command=self._trigger_dr_pepper_break)
         self.menu.add_separator()
-        self.menu.add_command(label=" Force Sleep", command=self._force_sleep)
-        self.menu.add_command(label=" Drop to Taskbar", command=self._drop_to_taskbar)
-        self.menu.add_command(label=" Hop to Active Window", command=self._hop_to_active)
+        self.menu.add_command(label="Toggle Voice Audio", command=self._toggle_sound)
+        self.menu.add_command(label="Force Sleep", command=self._force_sleep)
+        self.menu.add_command(label="Drop to Taskbar", command=self._drop_to_taskbar)
+        self.menu.add_command(label="Hop to Active Window", command=self._hop_to_active)
         self.menu.add_separator()
-        self.menu.add_command(label=" Dismiss", command=self.root.quit)
+        self.menu.add_command(label="Dismiss", command=self.root.quit)
 
         self._update_window_position()
         self.root.after(80, self._tick)
@@ -292,7 +443,7 @@ class AmadeusShimeji:
         """Gets active foreground window rect and title."""
         try:
             hwnd = win32gui.GetForegroundWindow()
-            if not hwnd or hwnd == self.root.winfo_id():
+            if not hwnd or hwnd == self.root.winfo_id() or hwnd == self.nixie.window.winfo_id():
                 return None
             class_name = win32gui.GetClassName(hwnd)
             if class_name in ("Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
@@ -316,8 +467,49 @@ class AmadeusShimeji:
         self._render()
         self._update_window_position()
 
+        # Update timers
+        self._update_pomodoro_sentinel()
+
         interval = 500 if self.state == "SLEEP" else 90
         self.root.after(interval, self._tick)
+
+    def _update_pomodoro_sentinel(self):
+        """1. Dr Pepper Pomodoro Sentinel: 50min work -> 5min rest."""
+        if self.is_taking_break:
+            self.break_seconds += 1
+            if self.break_seconds > 5 * 60:
+                self.is_taking_break = False
+                self.break_seconds = 0
+                self.focus_seconds = 0
+                self.state = "WALK"
+                self.show_speech("Break over! Let's get back to work, lab member.")
+        else:
+            self.focus_seconds += 1
+            if self.focus_seconds > 50 * 60:
+                self._trigger_dr_pepper_break()
+
+        # Sync with Nixie countdown
+        rem = max(0, (50 * 60) - self.focus_seconds)
+        self.nixie.update_pomodoro(rem)
+
+    def _trigger_dr_pepper_break(self):
+        self.is_taking_break = True
+        self.break_seconds = 0
+        self.state = "DRINK"
+        self.current_frame = "shime17"
+        self.sound.play("pinch")
+        self.show_speech("50min focus complete! Time for a Dr Pepper break.", frame="shime17")
+
+    def _check_terminal_guardian(self, title: str):
+        """3. Terminal Error Guardian: sniff error words in terminal windows."""
+        t_low = title.lower()
+        error_triggers = ("error:", "traceback", "failed", "fatal:", "exception", "pytest: failed")
+        if any(tr in t_low for tr in error_triggers):
+            if title != self.last_alerted_error:
+                self.last_alerted_error = title
+                self.state = "HOP"
+                self.sound.play("shake")
+                self.show_speech("Traceback or test error detected! Check your terminal.", emotion="surprised", frame="shime23")
 
     def _update_physics(self):
         active = self._get_active_window()
@@ -325,6 +517,8 @@ class AmadeusShimeji:
         if active:
             hwnd, rect, title = active
             self.target_title = title
+            self._check_terminal_guardian(title)
+
             if self.target_window_hwnd != hwnd and self.state not in ("HOP", "PARACHUTE"):
                 self.target_window_hwnd = hwnd
                 self.target_rect = rect
@@ -339,11 +533,9 @@ class AmadeusShimeji:
         if self.state == "WALK":
             if self.target_rect:
                 left, top, right, _ = self.target_rect
-                # If window is near the top of screen or maximized, keep Kurisu on-screen
                 target_y = 0 if top < 160 else max(0, top - 175)
                 self.y = target_y
 
-                # Calculate visible horizontal ledge bounds
                 ledge_left = max(10, left + 10)
                 ledge_right = min(self.screen_width - self.width - 10, right - self.width)
                 if ledge_right <= ledge_left:
@@ -392,7 +584,7 @@ class AmadeusShimeji:
         elif self.state == "DRINK":
             self.current_frame = "shime17"
             self.idle_timer += 1
-            if self.idle_timer > 60:
+            if not self.is_taking_break and self.idle_timer > 60:
                 self.state = "WALK"
                 self.idle_timer = 0
 
@@ -456,15 +648,13 @@ class AmadeusShimeji:
         bx1, by1 = 8, 6
         bx2, by2 = self.width - 8, 54
 
-        # Box border with Steins;Gate warm orange outline
         self.canvas.create_rectangle(bx1, by1, bx2, by2, fill="#14141E", outline="#E2583E", width=2)
-        # Downward pointer
         self.canvas.create_polygon(
             [self.width // 2 - 6, by2, self.width // 2 + 6, by2, self.width // 2, by2 + 7],
             fill="#14141E",
             outline="#E2583E",
         )
-        display_text = text if len(text) <= 42 else text[:40] + "…"
+        display_text = text if len(text) <= 42 else text[:40] + "..."
         self.canvas.create_text(
             self.width // 2,
             by1 + 24,
@@ -475,26 +665,43 @@ class AmadeusShimeji:
         )
 
     def _update_window_position(self):
-        # Strict boundary clamping: never allow window off the screen
         clamp_x = max(0, min(int(self.x), self.screen_width - self.width))
         clamp_y = max(0, min(int(self.y), self.screen_height - self.height - 35))
         self.x = clamp_x
         self.y = clamp_y
         self.root.geometry(f"{self.width}x{self.height}+{clamp_x}+{clamp_y}")
 
+        # Update floating Nixie HUD position to hover gracefully beside Kurisu
+        if self.nixie.visible:
+            nx = min(clamp_x + self.width - 20, self.screen_width - 180)
+            ny = max(10, clamp_y + 30)
+            self.nixie.set_position(nx, ny)
+
+    def _toggle_nixie_hud(self):
+        """2. Toggle Steins;Gate Nixie Tube Divergence Dock."""
+        if self.nixie.visible:
+            self.nixie.hide()
+        else:
+            self.nixie.show(int(self.x) + self.width - 20, int(self.y) + 30)
+
+    def _toggle_sound(self):
+        """4. Toggle audio voice output."""
+        self.sound.enabled = not self.sound.enabled
+        state = "ON" if self.sound.enabled else "OFF"
+        self.show_speech(f"Voice Audio: {state}")
+
     def on_emotion_change(self, emotion: str):
-        """Called when AMADEUS Brain reports an emotion change."""
         self.dominant_emotion = emotion
         if emotion in ("smug", "happy"):
-            self.current_frame = "shime17"  # Dr Pepper
+            self.current_frame = "shime17"
         elif emotion in ("annoyed", "angry", "surprised"):
-            self.current_frame = "shime23"  # Alert / tsundere
+            self.current_frame = "shime23"
         elif emotion in ("focused", "thinking"):
-            self.current_frame = "shime16"  # Reading
+            self.current_frame = "shime16"
 
     def show_speech(self, text: str, emotion: Optional[str] = None, frame: Optional[str] = None):
         self._active_speech_text = text
-        self.speech_bubble_timer = 65  # ~6 seconds
+        self.speech_bubble_timer = 65
         if frame:
             self.current_frame = frame
         elif emotion in ("annoyed", "surprised", "alert"):
@@ -503,11 +710,11 @@ class AmadeusShimeji:
             self.current_frame = "shime16"
 
     def _inspect_screen(self):
-        """Triggers active window capture and screen watcher critique."""
+        self.sound.play("flick")
         self.brain.inspect_active_screen(bbox=self.target_rect, window_title=self.target_title)
 
     def _prompt_chat_dialog(self):
-        """Opens retro chat prompt to talk directly to Kurisu."""
+        self.sound.play("tap")
         dialog = tk.Toplevel(self.root)
         dialog.title("Ask Kurisu")
         dialog.geometry("340x120")
@@ -547,10 +754,12 @@ class AmadeusShimeji:
         if self.is_dragging:
             self.is_dragging = False
             if abs(event.x - self.drag_start_x) < 5 and abs(event.y - self.drag_start_y) < 5:
-                # Poke interaction
+                # 4. Poke with real Japanese Kurisu voice line
+                self.sound.play("tap")
                 quote = random.choice(KURISU_QUOTES)
                 self.show_speech(quote, frame="shime23")
             else:
+                self.sound.play("pinch")
                 self.state = "PARACHUTE"
 
     def _show_context_menu(self, event):
