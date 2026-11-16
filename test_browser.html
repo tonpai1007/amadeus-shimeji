@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AMADEUS Kurisu Live2D - Test</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #14141E; color: #E8E6E3; font-family: Consolas, monospace; }
+  #status { position: absolute; top: 8px; left: 10px; font-size: 11px; color: #FFB347; z-index: 10; background: rgba(20, 20, 30, 0.75); padding: 3px 8px; border-radius: 4px; pointer-events: none; }
+  #debug { position: absolute; bottom: 8px; left: 10px; font-size: 10px; color: #888; z-index: 10; background: rgba(20, 20, 30, 0.6); padding: 4px 8px; border-radius: 4px; pointer-events: none; border: 1px solid #333; max-width: 400px; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/live2dcubismcore@1.0.2/live2dcubismcore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+</head>
+<body>
+<div id="status">Loading Kurisu Live2D...</div>
+<div id="debug">Initializing...</div>
+<canvas id="stage"></canvas>
+<script>
+(function () {
+  const statusEl = document.getElementById("status");
+  const debugEl = document.getElementById("debug");
+  
+  function log(msg) {
+    console.log(msg);
+    debugEl.textContent += msg + "\n";
+  }
+  
+  log("Step 1: Checking libraries...");
+  if (!window.PIXI) { log("ERROR: PIXI not loaded"); statusEl.textContent = "PIXI not loaded"; return; }
+  log("  PIXI OK: " + PIXI.VERSION);
+  if (!PIXI.live2d) { log("ERROR: PIXI.live2d not available"); statusEl.textContent = "PIXI.live2d not available"; return; }
+  log("  PIXI.live2d OK");
+  if (!window.Live2DCubismCore) { log("ERROR: Live2DCubismCore not loaded"); statusEl.textContent = "Live2DCubismCore not loaded"; return; }
+  log("  Live2DCubismCore OK");
+
+  log("Step 2: Creating PIXI app...");
+  const app = new PIXI.Application({
+    view: document.getElementById("stage"),
+    autoStart: true,
+    resizeTo: window,
+    backgroundAlpha: 0,
+  });
+  log("  PIXI app created");
+
+  log("Step 3: Loading model...");
+  PIXI.live2d.Live2DModel.from("./Kurisu.model3.json").then(model => {
+    log("  Model loaded successfully!");
+    app.stage.addChild(model);
+    
+    function fitModel() {
+      const scale = Math.min(window.innerWidth / model.width, window.innerHeight / model.height) * 0.92;
+      model.scale.set(scale);
+      model.anchor.set(0.5, 0.5);
+      model.x = window.innerWidth / 2;
+      model.y = window.innerHeight / 2 + 20;
+    }
+    fitModel();
+    window.addEventListener("resize", fitModel);
+    
+    model.on("hit", () => { model.motion("TapBody"); log("Hit!"); });
+    
+    statusEl.textContent = "Kurisu Live2D Online";
+    log("SUCCESS: Model is rendering!");
+  }).catch(err => {
+    log("ERROR loading model: " + err);
+    statusEl.textContent = "Model load error: " + err;
+  });
+})();
+</script>
+</body>
+</html>

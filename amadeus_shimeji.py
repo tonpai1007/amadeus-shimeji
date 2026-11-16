@@ -10,6 +10,8 @@ Integrated Core Capabilities:
 4. Authentic Kurisu Japanese Voice & Audio Engine (winmm native audio)
 5. Screen Watcher & Multimodal Vision Analysis (Ctrl+Shift+S)
 6. Live Emotion Sync & Interactive Chat (Ctrl+Shift+K)
+7. Agent Awareness — reacts live to your coding agents (thinking / tool-running /
+   erroring / done) via the AMADEUS brain's agent-activity feed.
 """
 
 import base64
@@ -58,6 +60,66 @@ KURISU_QUOTES = [
     "Time travel is theoretically possible, but right now you should write tests.",
     "Keep this world line above 1.048596% divergence, understood?",
 ]
+
+# --- Agent awareness -------------------------------------------------------
+# The brain publishes STRUCTURAL agent-activity state (never prompts, never
+# tool inputs/outputs). Kurisu reacts to the state change.
+# brain agent_state -> (sprite frame, emotion, line)
+AGENT_STATE_REACTIONS = {
+    "thinking": (
+        "shime16",
+        "focused",
+        "Oi. Your code agent is still thinking. How long has it been at it now?",
+    ),
+    "tool_running": (
+        "shime16",
+        "focused",
+        "It's running tools again. Don't interrupt it mid-write, idiot.",
+    ),
+    "error": (
+        "shime23",
+        "annoyed",
+        "Your build just broke. I saw it. Don't blame the timeline.",
+    ),
+    "glitch_error": (
+        "shime23",
+        "angry",
+        "Three failures in two minutes. Are you debugging, or flailing?",
+    ),
+    "done": (
+        "shime17",
+        "smug",
+        "It's done. Don't trust it until you've read the diff yourself.",
+    ),
+    "approval_wait": (
+        "shime23",
+        "surprised",
+        "Your agent is waiting on a permission prompt. Read it before you approve.",
+    ),
+}
+
+# Minimum seconds between two agent-activity lines (Kurisu is not a spam bot).
+AGENT_MESSAGE_COOLDOWN = 25.0
+# Fast poll cadence for the dedicated agent-state endpoint.
+AGENT_POLL_INTERVAL = 3.0
+
+
+def _resolve_brain_api_key() -> str:
+    """BRAIN_API_KEY from the environment, else from the AMADEUS repo .env."""
+    key = (os.getenv("BRAIN_API_KEY") or "").strip()
+    if key:
+        return key
+    try:
+        env_path = Path(r"C:\AMADEUS\.env")
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("BRAIN_API_KEY="):
+                value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if value:
+                    return value
+    except OSError:
+        pass
+    return ""
 
 
 def clamp_to_screen(
@@ -234,14 +296,72 @@ class ShimejiBrainSync:
         self.current_emotion = "content"
         self.divergence = "1.048596%"
         self.brain_online = False
+        # Agent awareness
+        self.last_agent_state = ""
+        self._last_agent_msg_ts = 0.0
 
         self._thread = threading.Thread(target=self._sync_loop, daemon=True)
         self._thread.start()
+        self._agent_thread = threading.Thread(target=self._agent_poll_loop, daemon=True)
+        self._agent_thread.start()
 
     def _sync_loop(self):
         while self.running:
             self._sync_kurisu_state()
             time.sleep(12)  # Ambient telemetry pulse
+
+    # ── Agent awareness ────────────────────────────────────────────────────
+    def _apply_agent_state(self, payload) -> None:
+        """React to the brain's agent-activity aggregate.
+
+        Only a STATE CHANGE produces a line, and a cooldown keeps Kurisu from
+        nagging. The payload carries structural markers only (state name,
+        session id, tool name) — never prompts or tool output.
+        """
+        if not isinstance(payload, dict):
+            return
+        state = str(payload.get("state") or "idle").strip()
+        if not state or state == self.last_agent_state:
+            return
+        reaction = AGENT_STATE_REACTIONS.get(state)
+        self.last_agent_state = state
+        if reaction is None:
+            return
+        now = time.time()
+        if (now - self._last_agent_msg_ts) < AGENT_MESSAGE_COOLDOWN:
+            return
+        self._last_agent_msg_ts = now
+        frame, emotion, message = reaction
+        logger.debug(f"ShimejiBrainSync._apply_agent_state: {state} -> {frame}")
+        self.app.show_speech(message, emotion=emotion, frame=frame)
+
+    def _agent_poll_loop(self):
+        """Fast poll of the brain's dedicated agent-state endpoint.
+
+        /api/v1/kurisu/sync carries the same data but only every 12 s; this
+        endpoint is cheap, so Kurisu reacts within ~3 s instead of ~12 s.
+        Skipped silently when no API key is available (the 12 s sync still
+        delivers the state).
+        """
+        api_key = _resolve_brain_api_key()
+        if not api_key:
+            return
+        while self.running:
+            try:
+                req = urllib.request.Request(
+                    f"{_BRAIN_BASE_URL}/api/v1/agent/state",
+                    headers={
+                        "Host": "127.0.0.1:8000",
+                        "User-Agent": "AMADEUS-Shimeji/2.0",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                )
+                with _NO_PROXY_OPENER.open(req, timeout=3) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                self._apply_agent_state(payload)
+            except Exception as exc:
+                logger.debug(f"ShimejiBrainSync._agent_poll_loop: silent exception ignored: {exc}")
+            time.sleep(AGENT_POLL_INTERVAL)
 
     def _sync_kurisu_state(self):
         """Pulls emotion state, divergence, GlobalWorkspace spotlight, and rate-limited thoughts."""
@@ -274,6 +394,9 @@ class ShimejiBrainSync:
                     if priority >= 0.7 and summary and summary != self._last_spotlight_summary:
                         self._last_spotlight_summary = summary
                         self.app.show_speech(summary, emotion="curious")
+
+                # Agent activity (structural state only) — Kurisu reacts.
+                self._apply_agent_state(data.get("agent_state") or {})
 
         except Exception as exc:
             self.brain_online = False

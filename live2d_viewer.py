@@ -45,6 +45,20 @@ _VIEWER_HTML = """<!DOCTYPE html>
     background: rgba(20, 20, 30, 0.75);
     padding: 3px 8px;
     border-radius: 4px;
+    pointer-events: none;
+  }
+  #controls {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    font-size: 10px;
+    color: #888;
+    z-index: 10;
+    background: rgba(20, 20, 30, 0.6);
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    border: 1px solid #333;
   }
   canvas {
     display: block;
@@ -52,12 +66,13 @@ _VIEWER_HTML = """<!DOCTYPE html>
     height: 100%;
   }
 </style>
-<script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/live2dcubismcore@1.0.2/live2dcubismcore.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
 </head>
 <body>
 <div id="status">Loading Kurisu Live2D...</div>
+<div id="controls">Click Kurisu · 1-8 Expressions · Right-click menu</div>
 <canvas id="stage"></canvas>
 <script>
 (async function () {
@@ -84,7 +99,112 @@ _VIEWER_HTML = """<!DOCTYPE html>
     }
     fitModel();
     window.addEventListener("resize", fitModel);
-    model.on("hit", () => { model.motion("TapBody"); });
+    const MOTIONS = [
+      "TapBody",
+      "58Loop",
+      "haru_g_idle",
+      "mtn_07",
+      "Out From Camera",
+      "xhiyori_m03",
+    ];
+    const EXPRESSIONS = [
+      "Stanby Smile",
+      "Stanby Angry",
+      "Stanby Surprised",
+      "Stanby Sad",
+      "Stanby Scared",
+      "Blush 1",
+      "Blush 2",
+      "Arm Change",
+    ];
+    let motionIdx = 0;
+    let currentMotion = null;
+
+    function fitModel() {
+      const scale = Math.min(window.innerWidth / model.width, window.innerHeight / model.height) * 0.92;
+      model.scale.set(scale);
+      model.anchor.set(0.5, 0.5);
+      model.x = window.innerWidth / 2;
+      model.y = window.innerHeight / 2 + 20;
+    }
+    fitModel();
+    window.addEventListener("resize", fitModel);
+
+    model.on("hit", () => {
+      motionIdx = (motionIdx + 1) % MOTIONS.length;
+      const m = MOTIONS[motionIdx];
+      if (currentMotion) currentMotion.stop();
+      currentMotion = model.motion(m);
+      statusEl.textContent = "Motion: " + m;
+      statusEl.style.opacity = "1";
+      setTimeout(() => { statusEl.style.opacity = "0.35"; }, 2500);
+    });
+
+    window.addEventListener("keydown", (e) => {
+      const key = e.key;
+      if (key >= "1" && key <= "8") {
+        const idx = parseInt(key) - 1;
+        const exp = EXPRESSIONS[idx];
+        if (exp) {
+          model.expression(exp);
+          statusEl.textContent = "Expression: " + exp;
+          statusEl.style.opacity = "1";
+          setTimeout(() => { statusEl.style.opacity = "0.35"; }, 2500);
+        }
+      }
+    });
+
+    const canvas = document.getElementById("stage");
+    const menu = document.createElement("div");
+    menu.style.position = "absolute";
+    menu.style.display = "none";
+    menu.style.zIndex = "100";
+    menu.style.background = "#14141E";
+    menu.style.border = "1px solid #FFB347";
+    menu.style.color = "#FFB347";
+    menu.style.fontFamily = "Consolas, monospace";
+    menu.style.fontSize = "11px";
+    menu.style.padding = "4px";
+    menu.style.borderRadius = "4px";
+    menu.style.minWidth = "140px";
+    document.body.appendChild(menu);
+
+    const motionsHtml = MOTIONS.map((m, i) =>
+      "<div style=\"padding:2px 8px; cursor:pointer; border-bottom:1px solid #222;\" onclick=\"setMotion('" + m + "')\">" + (i+1) + ". " + m + "</div>"
+    ).join("");
+    const exprsHtml = EXPRESSIONS.map((e, i) =>
+      "<div style=\"padding:2px 8px; cursor:pointer;\" onclick=\"setExpression('" + e + "')\">" + (i+1) + ". " + e + "</div>"
+    ).join("");
+
+    menu.innerHTML = "<div style=\"padding:4px 8px; font-weight:bold; border-bottom:1px solid #333;\">Kurisu Live2D</div><div style=\"font-size:9px; color:#666; padding:2px 8px;\">Motions:</div>" + motionsHtml + "<div style=\"font-size:9px; color:#666; padding:2px 8px;\">Expressions:</div>" + exprsHtml + "<div style=\"padding:4px 8px; font-size:9px; color:#888;\">Click outside to close</div>";
+
+    window.setMotion = (name) => {
+      if (currentMotion) currentMotion.stop();
+      currentMotion = model.motion(name);
+      statusEl.textContent = "Motion: " + name;
+      statusEl.style.opacity = "1";
+      menu.style.display = "none";
+    };
+
+    window.setExpression = (name) => {
+      model.expression(name);
+      statusEl.textContent = "Expression: " + name;
+      statusEl.style.opacity = "1";
+      menu.style.display = "none";
+    };
+
+    canvas.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      menu.style.left = (e.clientX - rect.left) + "px";
+      menu.style.top = (e.clientY - rect.top) + "px";
+      menu.style.display = "block";
+    });
+
+    document.addEventListener("click", () => {
+      menu.style.display = "none";
+    });
+
     statusEl.textContent = "Kurisu Live2D Online";
     setTimeout(() => { statusEl.style.opacity = "0.35"; }, 2500);
   } catch (err) {
