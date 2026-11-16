@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import urllib.request
 import urllib.error
+import webbrowser
 
 from loguru import logger
 from PIL import Image, ImageGrab, ImageTk
@@ -41,6 +42,8 @@ except ImportError:
 SPRITES_DIR = Path(__file__).parent / "sprites"
 SOUNDS_DIR = Path(__file__).parent / "assets" / "sounds"
 CHROMA_KEY = "#000001"  # 100% transparent click-through color key on Windows
+_BRAIN_BASE_URL = "http://127.0.0.1:8000"
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 # Built-in fallback Kurisu Tsundere / Lab Assistant dialogue lines
 KURISU_QUOTES = [
@@ -55,6 +58,34 @@ KURISU_QUOTES = [
     "Time travel is theoretically possible, but right now you should write tests.",
     "Keep this world line above 1.048596% divergence, understood?",
 ]
+
+
+def clamp_to_screen(
+    x: float,
+    y: float,
+    screen_width: int,
+    screen_height: int,
+    width: int,
+    height: int,
+) -> Tuple[float, float]:
+    """Clamp Shimeji coordinates strictly inside visible screen bounds."""
+    max_x = max(0, screen_width - width)
+    max_y = max(0, screen_height - height)
+    return (max(0.0, min(float(x), float(max_x))), max(0.0, min(float(y), float(max_y))))
+
+
+def detect_app_persona(title: str) -> Optional[Tuple[str, str]]:
+    """Return (persona_key, remark) for recognized active window titles."""
+    t = (title or "").lower()
+    if any(k in t for k in ("visual studio code", " - code", "cursor")):
+        return ("ide", "Reviewing your diff... keep functions small and tested.")
+    if any(k in t for k in ("powershell", "windows terminal", "command prompt", "cmd.exe")):
+        return ("terminal", "Shell session active. Watching for non-zero exits.")
+    if "obsidian" in t:
+        return ("obsidian", "Organizing the Second Brain? Don't let notes go stale.")
+    if any(k in t for k in ("chrome", "edge", "firefox", "brave")):
+        return ("browser", "Researching online? Verify primary sources first.")
+    return None
 
 
 class KurisuSoundManager:
@@ -197,6 +228,9 @@ class ShimejiBrainSync:
         self.app = app
         self.running = True
         self.last_thought = ""
+        self._last_spotlight_summary = ""
+        self._last_think_ts = 0.0
+        self._think_cooldown = max(60, int(os.getenv("PROACTIVE_COOLDOWN_SECONDS", "1200")))
         self.current_emotion = "content"
         self.divergence = "1.048596%"
         self.brain_online = False
@@ -210,13 +244,13 @@ class ShimejiBrainSync:
             time.sleep(12)  # Ambient telemetry pulse
 
     def _sync_kurisu_state(self):
-        """Pulls emotion state, divergence, and spontaneous thoughts."""
+        """Pulls emotion state, divergence, GlobalWorkspace spotlight, and rate-limited thoughts."""
         try:
             req = urllib.request.Request(
-                "http://localhost:8000/kurisu/sync",
-                headers={"Host": "localhost", "User-Agent": "AMADEUS-Shimeji/2.0"},
+                f"{_BRAIN_BASE_URL}/api/v1/kurisu/sync",
+                headers={"Host": "127.0.0.1:8000", "User-Agent": "AMADEUS-Shimeji/2.0"},
             )
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with _NO_PROXY_OPENER.open(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.brain_online = True
 
@@ -232,19 +266,30 @@ class ShimejiBrainSync:
                     self.divergence = new_div
                     self.app.nixie.set_divergence(new_div)
 
+                spotlight = data.get("spotlight") or []
+                if spotlight:
+                    top = spotlight[0]
+                    summary = str(top.get("summary") or "").strip()
+                    priority = float(top.get("priority", 0.0) or 0.0)
+                    if priority >= 0.7 and summary and summary != self._last_spotlight_summary:
+                        self._last_spotlight_summary = summary
+                        self.app.show_speech(summary, emotion="curious")
+
         except Exception as exc:
             self.brain_online = False
             logger.debug(f"ShimejiBrainSync._sync_kurisu_state: silent exception ignored: {exc}")
 
-        # Check for spontaneous thought
-        if self.brain_online:
+        # Rate-limited spontaneous thought (AGENTS.md autonomous cooldown >= 1200s)
+        now = time.time()
+        if self.brain_online and (now - self._last_think_ts) >= self._think_cooldown:
+            self._last_think_ts = now
             try:
                 req_think = urllib.request.Request(
-                    "http://localhost:8000/kurisu/think",
-                    headers={"Host": "localhost", "Content-Type": "application/json"},
+                    f"{_BRAIN_BASE_URL}/api/v1/kurisu/think",
+                    headers={"Host": "127.0.0.1:8000", "Content-Type": "application/json"},
                     data=json.dumps({"user_id": "tonpai"}).encode("utf-8"),
                 )
-                with urllib.request.urlopen(req_think, timeout=5) as resp:
+                with _NO_PROXY_OPENER.open(req_think, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     thought = data.get("response", "")
                     if thought and thought != self.last_thought:
@@ -266,14 +311,14 @@ class ShimejiBrainSync:
 
                 if self.brain_online:
                     req = urllib.request.Request(
-                        "http://localhost:8000/kurisu/chat",
-                        headers={"Host": "localhost", "Content-Type": "application/json"},
+                        f"{_BRAIN_BASE_URL}/api/v1/kurisu/chat",
+                        headers={"Host": "127.0.0.1:8000", "Content-Type": "application/json"},
                         data=json.dumps({
                             "message": f"[Screen Inspection: User is currently on '{window_title}']. Make a sharp, concise Steins;Gate Kurisu observation about what they are doing.",
                             "user_id": "tonpai"
                         }).encode("utf-8"),
                     )
-                    with urllib.request.urlopen(req, timeout=10) as resp:
+                    with _NO_PROXY_OPENER.open(req, timeout=10) as resp:
                         res = json.loads(resp.read().decode("utf-8"))
                         self.app.show_speech(res.get("response", "Looks orderly."), emotion=res.get("emotion"))
                         return
@@ -303,17 +348,17 @@ class ShimejiBrainSync:
         threading.Thread(target=_worker, daemon=True).start()
 
     def ask_kurisu(self, prompt: str):
-        """Sends user prompt to /kurisu/chat."""
+        """Sends user prompt to /api/v1/kurisu/chat."""
         def _worker():
             self.app.show_speech("Thinking...", frame="shime16")
             try:
                 if self.brain_online:
                     req = urllib.request.Request(
-                        "http://localhost:8000/kurisu/chat",
-                        headers={"Host": "localhost", "Content-Type": "application/json"},
+                        f"{_BRAIN_BASE_URL}/api/v1/kurisu/chat",
+                        headers={"Host": "127.0.0.1:8000", "Content-Type": "application/json"},
                         data=json.dumps({"message": prompt, "user_id": "tonpai"}).encode("utf-8"),
                     )
-                    with urllib.request.urlopen(req, timeout=15) as resp:
+                    with _NO_PROXY_OPENER.open(req, timeout=15) as resp:
                         res = json.loads(resp.read().decode("utf-8"))
                         self.app.show_speech(res.get("response", "I heard you."), emotion=res.get("emotion"))
                         return
@@ -378,8 +423,11 @@ class AmadeusShimeji:
         self.break_seconds = 0
         self.is_taking_break = False
 
-        # 3. Terminal Error Guardian
+        # 3. Terminal Error Guardian & App Personas
         self.last_alerted_error = ""
+        self._last_persona_key = ""
+        self._last_persona_ts = 0.0
+        self.live2d_proc = None
 
         # Drag tracking
         self.is_dragging = False
@@ -398,6 +446,8 @@ class AmadeusShimeji:
         self.root.bind_all("<Control-Shift-s>", lambda e: self._inspect_screen())
         self.root.bind_all("<Control-Shift-K>", lambda e: self._prompt_chat_dialog())
         self.root.bind_all("<Control-Shift-k>", lambda e: self._prompt_chat_dialog())
+        self.root.bind_all("<Control-Shift-L>", lambda e: self._toggle_live2d_viewer())
+        self.root.bind_all("<Control-Shift-l>", lambda e: self._toggle_live2d_viewer())
 
         # 2. Floating Nixie Divergence HUD
         self.nixie = NixieDivergenceHUD(self.root)
@@ -407,8 +457,13 @@ class AmadeusShimeji:
 
         # Context Menu
         self.menu = tk.Menu(self.root, tearoff=0)
+        self.menu.add_command(
+            label="Open AMADEUS Webapp (Browser)",
+            command=lambda: webbrowser.open(f"{_BRAIN_BASE_URL}/dashboard"),
+        )
         self.menu.add_command(label="Inspect Active Screen (Ctrl+Shift+S)", command=self._inspect_screen)
         self.menu.add_command(label="Talk to Kurisu (Ctrl+Shift+K)", command=self._prompt_chat_dialog)
+        self.menu.add_command(label="Toggle Live2D Full Model (Ctrl+Shift+L)", command=self._toggle_live2d_viewer)
         self.menu.add_command(label="Toggle Nixie Divergence HUD", command=self._toggle_nixie_hud)
         self.menu.add_command(label="Take Dr Pepper Break Now", command=self._trigger_dr_pepper_break)
         self.menu.add_separator()
@@ -511,6 +566,19 @@ class AmadeusShimeji:
                 self.sound.play("shake")
                 self.show_speech("Traceback or test error detected! Check your terminal.", emotion="surprised", frame="shime23")
 
+    def _check_app_persona(self, title: str):
+        """Throttled context-aware remark when switching between major apps."""
+        persona = detect_app_persona(title)
+        if not persona:
+            return
+        key, remark = persona
+        now = time.time()
+        if key != self._last_persona_key and (now - self._last_persona_ts) >= 180:
+            self._last_persona_key = key
+            self._last_persona_ts = now
+            if self.speech_bubble_timer <= 0:
+                self.show_speech(remark, emotion="thinking")
+
     def _update_physics(self):
         active = self._get_active_window()
 
@@ -518,6 +586,7 @@ class AmadeusShimeji:
             hwnd, rect, title = active
             self.target_title = title
             self._check_terminal_guardian(title)
+            self._check_app_persona(title)
 
             if self.target_window_hwnd != hwnd and self.state not in ("HOP", "PARACHUTE"):
                 self.target_window_hwnd = hwnd
@@ -624,6 +693,10 @@ class AmadeusShimeji:
                 self.y = target_floor
                 self.state = "SIT"
 
+        self.x, self.y = clamp_to_screen(
+            self.x, self.y, self.screen_width, self.screen_height, self.width, self.height
+        )
+
     def _render(self):
         self.canvas.delete("all")
 
@@ -683,6 +756,24 @@ class AmadeusShimeji:
             self.nixie.hide()
         else:
             self.nixie.show(int(self.x) + self.width - 20, int(self.y) + 30)
+
+    def _toggle_live2d_viewer(self):
+        """M3: Toggle pop-out Live2D full-model viewer process."""
+        if self.live2d_proc is not None and self.live2d_proc.poll() is None:
+            self.live2d_proc.terminate()
+            self.live2d_proc = None
+            self.show_speech("Live2D full-model window closed. Returning to 0% GPU mode.")
+            return
+
+        from live2d_viewer import launch_live2d_process
+
+        proc = launch_live2d_process()
+        if proc is None:
+            self.show_speech("Kurisu.model3.json not found in assets/live2d/kurisu/.", emotion="annoyed")
+            return
+        self.live2d_proc = proc
+        self.sound.play("tap")
+        self.show_speech("Opening Live2D full-model viewer...", emotion="happy")
 
     def _toggle_sound(self):
         """4. Toggle audio voice output."""
@@ -747,8 +838,14 @@ class AmadeusShimeji:
         if self.is_dragging:
             self.state = "DRAGGED"
             self.current_frame = "shime12"
-            self.x += event.x - self.drag_start_x
-            self.y += event.y - self.drag_start_y
+            self.x, self.y = clamp_to_screen(
+                self.x + event.x - self.drag_start_x,
+                self.y + event.y - self.drag_start_y,
+                self.screen_width,
+                self.screen_height,
+                self.width,
+                self.height,
+            )
 
     def _on_release(self, event):
         if self.is_dragging:

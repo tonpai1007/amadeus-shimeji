@@ -1,10 +1,10 @@
-# 🥼 AMADEUS Retro Pixel Shimeji (Lab Assistant Desktop Companion)
+#  AMADEUS Retro Pixel Shimeji (Lab Assistant Desktop Companion)
 
 A native, ultra-lightweight Windows desktop companion that walks on your active window title bars (VS Code, Chrome, Terminal), sits down to read a science journal, drinks Dr Pepper, parachutes on window minimize, and connects to the AMADEUS Brain.
 
 ---
 
-## ⚡ Performance & Resource Profile
+##  Performance & Resource Profile
 
 | Metric | AMADEUS Shimeji | Old Electron / WebGL Live2D |
 | :--- | :--- | :--- |
@@ -15,7 +15,7 @@ A native, ultra-lightweight Windows desktop companion that walks on your active 
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 Run the Shimeji companion directly from your AMADEUS root:
 
@@ -30,7 +30,7 @@ python tools/shimeji/sprite_generator.py
 
 ---
 
-## 🎮 Desktop Behaviors & Controls
+##  Desktop Behaviors & Controls
 
 - **Climbs Active Window:** Follows the top title bar of whatever window you are focused on (VS Code, Chrome, etc.).
 - **Window Hopping:** When you Alt+Tab or click a different window, Kurisu hops across the screen to land on the new window header.
@@ -39,15 +39,15 @@ python tools/shimeji/sprite_generator.py
 - **Left Click:** Pokes Kurisu for a random tsundere quote or reaction speech bubble.
 - **Click & Drag:** Pick her up and toss her anywhere on screen; she will parachute down to the nearest ledge.
 - **Right Click Context Menu:**
-  - 💬 *Ask Kurisu*
-  - 😴 *Force Sleep (0% resource mode)*
-  - 🪂 *Drop to Taskbar*
-  - 🧗 *Hop to Active Window*
-  - ❌ *Dismiss / Exit*
+  -  *Ask Kurisu*
+  -  *Force Sleep (0% resource mode)*
+  -  *Drop to Taskbar*
+  -  *Hop to Active Window*
+  -  *Dismiss / Exit*
 
 ---
 
-## 🎨 Dropping In Official / Custom Sprite Packs
+##  Dropping In Official / Custom Sprite Packs
 
 The engine adheres to the universal **Shimeji-ee** standard. To replace or expand Kurisu's sprites:
 
